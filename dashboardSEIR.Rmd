@@ -1,0 +1,260 @@
+---
+title: "Modelo SEIR COVID-19"
+output:
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    source_code: embed
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(scales)
+library(plotly)
+library(flexdashboard)
+
+Poblacion <- 7000000
+Ninf <- 1
+Rt <- 3.0
+Tinf <- 2.9
+Tinc <- 5.2
+ND <- 200
+deltaT <- 1
+Fat <- 10
+rho <- 1.0
+
+# Para la cantidad de dias escogidas, hay que calcular la cantidad de iteraciones segun deltaT
+iteraciones <- round(ND/deltaT)
+indices <- c(1:iteraciones)
+# En cada iteracion, hay que resolver la ecuacion diferencial de cada Etapa
+
+# Inicializo las variables
+S <- numeric(iteraciones)
+E <- numeric(iteraciones)
+I <- numeric(iteraciones)
+R <- numeric(iteraciones)
+
+S[1] <- 1-Ninf/Poblacion
+E[1] <- Ninf/Poblacion
+I[1] <- 0
+R[1] <- 0
+
+for(i in 2:iteraciones){
+  S[i] <- S[i-1] - rho*(Rt/Tinf)*I[i-1]*S[i-1]*deltaT
+  E[i] <- E[i-1] + (rho*(Rt/Tinf)*I[i-1]*S[i-1] - (E[i-1]/Tinc))*deltaT
+  I[i] <- I[i-1] + ((E[i-1]/Tinc)-(I[i-1]/Tinf))*deltaT
+  R[i] <- R[i-1] + (I[i-1]/Tinf)*deltaT
+}
+
+# Creamos un dataframe de los resultados
+SEIR <- data.frame(dia=indices,
+                   Susceptibles=S*Poblacion,
+                   Expuestos=E*Poblacion,
+                   Infectados=I*Poblacion,
+                   Removidos=R*Poblacion)
+
+# Calculo la cantidad de fatalidades segun porcentaje
+SEIR$Fallecidos <- SEIR$Removidos*(Fat/100)
+# Las fatalidades le resta el valor a un porcentaje de Removed - Recovered/Fatalities
+SEIR$Curados <- SEIR$Removidos-SEIR$Fallecidos
+
+# Vamos a hacer tidy en SEIR
+tidySEIR <- SEIR %>% select(-Susceptibles, -Removidos) %>% pivot_longer(-dia, names_to = 'Etapa', values_to = 'Cantidad')
+
+tidySEIR$Etapa <- factor(tidySEIR$Etapa,
+                         levels = c('Curados', 'Expuestos', 'Infectados', 'Fallecidos'))
+
+dataset <- tidySEIR
+```
+
+**Simulacion**
+===================================== 
+
+Column {.sidebar data-width=350}
+-----------------------------------------------------------------------
+
+**Parámetros de Simulación**
+
+```{r, echo=FALSE}
+sliderInput("input_poblacion", label = "Población:",
+            min = 10000, max = 40000000, value = 7000000, step = 5000)
+
+sliderInput("input_ninf", label = "Número Inicial de Infectados:",
+            min = 1, max = 100, value = 1, step = 1)
+
+sliderInput("input_rt", label = "Número Reproductivo Rt:",
+            min = 0, max = 10.0, value = 3.0, step = 0.1)
+
+sliderInput("input_tinf", label = "Período Infeccioso Tinf [días]:",
+            min = 0, max = 24, value = 2.9, step = 0.1)
+
+sliderInput("input_tinc", label = "Período de Incubación Tinc [días]:",
+            min = 0, max = 24, value = 5.2, step = 0.1)
+
+sliderInput("input_dsim", label = "Días de Simulación:",
+            min = 100, max = 500, value = 200, step = 1)
+
+sliderInput("input_deltat", label = "Delta T:",
+            min = 1, max = 5, value = 1, step = 1)
+
+sliderInput("input_fat", label = "Porcentaje de Fatalidad: ",
+            min = 0, max = 100, value = 10, step = 0.1)
+
+sliderInput("input_rho", label = "Distanciamiento Social: ",
+            min = 0, max = 1, value = 1.0, step = 0.1)
+
+```
+
+
+Row
+-----------------------------------------------------------------------
+
+### **Evolución de Casos**
+
+```{r, echo=FALSE}
+dataset <- reactive({
+  
+  Poblacion <- input$input_poblacion
+  Ninf <- input$input_ninf
+  Rt <- input$input_rt
+  Tinf <- input$input_tinf
+  Tinc <- input$input_tinc
+  ND <- input$input_dsim
+  deltaT <- input$input_deltat
+  Fat <- input$input_fat
+  rho <- input$input_rho
+  
+  iteraciones <- round(ND/deltaT)
+  indices <- c(1:iteraciones)
+  
+  # Inicializo las variables
+  S <- numeric(iteraciones)
+  E <- numeric(iteraciones)
+  I <- numeric(iteraciones)
+  R <- numeric(iteraciones)
+
+  S[1] <- 1-Ninf/Poblacion
+  E[1] <- Ninf/Poblacion
+  I[1] <- 0
+  R[1] <- 0
+  
+  for(i in 2:iteraciones){
+  S[i] <- S[i-1] - rho*(Rt/Tinf)*I[i-1]*S[i-1]*deltaT
+  E[i] <- E[i-1] + (rho*(Rt/Tinf)*I[i-1]*S[i-1] - (E[i-1]/Tinc))*deltaT
+  I[i] <- I[i-1] + ((E[i-1]/Tinc)-(I[i-1]/Tinf))*deltaT
+  R[i] <- R[i-1] + (I[i-1]/Tinf)*deltaT
+  }
+
+  # Creamos un dataframe de los resultados
+  SEIR <- data.frame(dia=indices,
+                     Susceptibles=S*Poblacion,
+                     Expuestos=E*Poblacion,
+                     Infectados=I*Poblacion,
+                     Removidos=R*Poblacion)
+
+  # Calculo la cantidad de fatalidades segun porcentaje
+  SEIR$Fallecidos <- SEIR$Removidos*(Fat/100)
+  # Las fatalidades le resta el valor a un porcentaje de Removed - Recovered/Fatalities
+  SEIR$Curados <- SEIR$Removidos-SEIR$Fallecidos
+
+  # Vamos a hacer tidy el SEIR
+  tidySEIR <- SEIR %>% select(-Susceptibles, -Removidos) %>% 
+    pivot_longer(-dia, names_to = 'Etapa', values_to = 'Cantidad')
+
+  tidySEIR$Etapa <- factor(tidySEIR$Etapa,
+                           levels = c('Curados', 'Expuestos', 'Infectados', 'Fallecidos'))
+  
+  tidySEIR$Cantidad <- round(tidySEIR$Cantidad)
+  
+  tidySEIR
+})
+
+renderPlotly({
+ 
+  plot <- dataset() %>% ggplot(aes(x=dia, y=Cantidad, color=Etapa)) + geom_line(size=1.2) + 
+  scale_y_continuous(labels = label_comma(big.mark = "."), breaks = pretty_breaks()) +
+  scale_x_continuous(breaks = pretty_breaks()) + 
+    theme_light() + 
+  labs(x='Días desde Primer Caso',
+       y='') + theme(legend.position = 'bottom',
+                                      axis.title.x = element_text(face = "bold", size = 12),
+                                      axis.title.y = element_text(face = "bold", size = 12)) +
+    scale_color_manual( values = c("#6ce763", "#63a2e7", "#fb9a59", "#fb4870"))
+
+  ggplotly(plot) %>% layout(legend = list(orientation = 'h')) %>% 
+  layout(legend = list(x=0.0, y=1.1)) %>% layout(xaxis = list(autorange = TRUE),
+                                                yaxis = list(autorange = TRUE))
+  
+})
+```
+
+Row
+-----------------------------------------------------------------------
+
+### Total Curados
+
+```{r, echo=FALSE}
+
+curad <- reactive({
+  ND <- input$input_dsim
+  deltaT <- input$input_deltat
+  iteraciones <- round(ND/deltaT)
+  df <- dataset()
+  c <- round(df[df$dia==iteraciones & df$Etapa=='Curados', 3])
+  c
+})
+
+flexdashboard::renderValueBox({
+    valueBox(curad(), icon = "ion-heart", color="#6ce763")
+})
+```
+
+### Total Infectados
+
+```{r, echo=FALSE}
+infec <- reactive({
+  ND <- input$input_dsim
+  deltaT <- input$input_deltat
+  iteraciones <- round(ND/deltaT)
+  df <- dataset()
+  c <- round(df[df$dia==iteraciones & df$Etapa=='Infectados', 3])
+  c
+})
+
+flexdashboard::renderValueBox({
+    valueBox(infec(), icon = "ion-medkit", color="#fb9a59")
+})
+```
+
+### Total Fallecidos
+
+```{r, echo=FALSE}
+falle <- reactive({
+  ND <- input$input_dsim
+  deltaT <- input$input_deltat
+  iteraciones <- round(ND/deltaT)
+  df <- dataset()
+  c <- round(df[df$dia==iteraciones & df$Etapa=='Fallecidos', 3])
+  c
+})
+
+flexdashboard::renderValueBox({
+    valueBox(falle(), icon = "fa-exclamation-triangle", color="#fb4870")
+})
+```
+
+Creditos
+===================================== 
+    
+**Autor:** Ronald Delgado <br />
+**Contacto:** ronald.delgado@gmail.com <br />
+**LinkedIn:** https://www.linkedin.com/in/ronald-delgado <br />
+
+Este dashboard presenta una simulacion del modelo epidemiologico compartimental [SEIR](https://en.wikipedia.org/wiki/Compartmental_models_in_epidemiology#The_SEIR_model) siguiendo el ejemplo y ecuaciones del trabajo de [Gabriel Goh](http://gabgoh.github.io/) en su implementacion del [Epidemic Calculator](http://gabgoh.github.io/COVID/), asi como del articulo de [Christian Hubbs](https://towardsdatascience.com/social-distancing-to-slow-the-coronavirus-768292f04296) sobre el efecto del distanciamiento social en epidemias. <br />
+El mismo representa un modelo aproximado de la dinamica de una epidemia y debe tomarse solo como una referencia a efectos de investigacion, estudio o toma de decisiones.
+
+
+
+
+
